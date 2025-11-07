@@ -1,0 +1,147 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isManager() {
+      return isAuthenticated() &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'manager'];
+    }
+
+    function isViewer() {
+      return isAuthenticated() &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'manager', 'viewer'];
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidUser(userData) {
+      return userData.keys().hasAll(['uid', 'email', 'name', 'role']) &&
+             userData.uid is string &&
+             userData.email is string &&
+             userData.name is string &&
+             userData.role in ['admin', 'manager', 'viewer'];
+    }
+
+    function isValidApartment(apartmentData) {
+      return apartmentData.keys().hasAll(['name', 'location', 'totalRooms', 'createdBy']) &&
+             apartmentData.name is string &&
+             apartmentData.location is string &&
+             apartmentData.totalRooms is number &&
+             apartmentData.createdBy is string;
+    }
+
+    function isValidRoom(roomData) {
+      return roomData.keys().hasAll(['apartmentId', 'roomNumber', 'status']) &&
+             roomData.apartmentId is string &&
+             roomData.roomNumber is string &&
+             roomData.status in ['vacant', 'occupied', 'maintenance'];
+    }
+
+    function isValidGuest(guestData) {
+      return guestData.keys().hasAll(['name', 'phone', 'createdBy']) &&
+             guestData.name is string &&
+             guestData.phone is string &&
+             guestData.createdBy is string;
+    }
+
+    function isValidContract(contractData) {
+      return contractData.keys().hasAll(['guestId', 'apartmentId', 'roomId', 'startDate', 'endDate', 'rentAmount']) &&
+             contractData.guestId is string &&
+             contractData.apartmentId is string &&
+             contractData.roomId is string &&
+             contractData.startDate is timestamp &&
+             contractData.endDate is timestamp &&
+             contractData.rentAmount is number;
+    }
+
+    function isValidTransaction(transactionData) {
+      return transactionData.keys().hasAll(['type', 'amount', 'date', 'createdBy']) &&
+             transactionData.type in ['income', 'expense'] &&
+             transactionData.amount is number &&
+             transactionData.date is timestamp &&
+             transactionData.createdBy is string;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read, write: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      allow create: if isAuthenticated() && isAdmin() && isValidUser(resource.data);
+      allow update: if isAuthenticated() && (isOwner(userId) || isAdmin()) && isValidUser(resource.data);
+      allow delete: if isAuthenticated() && isAdmin();
+    }
+
+    // Apartments collection
+    match /apartments/{apartmentId} {
+      allow read: if isViewer();
+      allow create: if isManager() && isValidApartment(resource.data) &&
+                     resource.data.createdBy == request.auth.uid;
+      allow update: if isManager() && isValidApartment(resource.data) &&
+                     (resource.data.createdBy == request.auth.uid || isAdmin());
+      allow delete: if isAdmin() || (isManager() && resource.data.createdBy == request.auth.uid);
+    }
+
+    // Rooms collection
+    match /rooms/{roomId} {
+      allow read: if isViewer();
+      allow create: if isManager() && isValidRoom(resource.data);
+      allow update: if isManager() && isValidRoom(resource.data);
+      allow delete: if isAdmin() || isManager();
+    }
+
+    // Guests collection
+    match /guests/{guestId} {
+      allow read: if isViewer();
+      allow create: if isManager() && isValidGuest(resource.data) &&
+                     resource.data.createdBy == request.auth.uid;
+      allow update: if isManager() && isValidGuest(resource.data) &&
+                     (resource.data.createdBy == request.auth.uid || isAdmin());
+      allow delete: if isAdmin() || (isManager() && resource.data.createdBy == request.auth.uid);
+    }
+
+    // Contracts collection
+    match /contracts/{contractId} {
+      allow read: if isViewer();
+      allow create: if isManager() && isValidContract(resource.data);
+      allow update: if isManager() && isValidContract(resource.data);
+      allow delete: if isAdmin() || isManager();
+    }
+
+    // Transactions collection
+    match /transactions/{transactionId} {
+      allow read: if isViewer();
+      allow create: if isManager() && isValidTransaction(resource.data) &&
+                     resource.data.createdBy == request.auth.uid;
+      allow update: if isAdmin() || (isManager() && resource.data.createdBy == request.auth.uid);
+      allow delete: if isAdmin() || (isManager() && resource.data.createdBy == request.auth.uid);
+    }
+
+    // Notifications collection
+    match /notifications/{notificationId} {
+      allow read, write: if isAuthenticated() &&
+                         resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() &&
+                     resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() &&
+                     resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() &&
+                     resource.data.userId == request.auth.uid;
+    }
+
+    // Deny all other reads and writes
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
